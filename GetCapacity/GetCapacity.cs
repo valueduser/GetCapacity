@@ -9,6 +9,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using System.Threading.Tasks;
 
 namespace GetCapacity
 {
@@ -28,15 +29,6 @@ namespace GetCapacity
         string url = config["url"];
         string xpath = config["xpath"];
 
-        DayOfWeek lastUpdate = (DayOfWeek)Enum.Parse(typeof(DayOfWeek),
-        (config["lastUpdateDay"] != null) ? config["lastUpdateDay"] : DateTime.Now.DayOfWeek.ToString()); //TODO:
-
-        //TODO: Consider timezone
-        if (DateTime.Now.DayOfWeek.Equals(DayOfWeek.Sunday) && lastUpdate.Equals(DayOfWeek.Saturday))
-        {
-          //TODO: Create a new file and rename the old file
-        }
-
         HtmlWeb web = new HtmlWeb();
         var htmlDoc = web.Load(url);
 
@@ -46,6 +38,8 @@ namespace GetCapacity
                         .First().InnerText;
 
         string scriptJson = script.Substring(0, script.IndexOf("function"));
+
+        log.LogInformation("Parsing the returned HTML...");
 
         var engine = new Jurassic.ScriptEngine();
         var result = engine.Evaluate("(function() { " + scriptJson + " return data; })()");
@@ -64,13 +58,15 @@ namespace GetCapacity
         StringBuilder sb = new StringBuilder(existingData);
         if (sb.Length > 0)
         {
-          sb.Remove(sb.Length - 1, 1); // remove ending }
+          sb.Remove(sb.Length - 1, 1); // remove ending '}'
           sb.Append(",");
         }
         else
         {
           sb.Append("{");
         }
+
+        log.LogInformation($"Writing new data to blob... {json.Length}");
 
         sb.Append($"\"{timestampUtc}\": {json}");
         sb.Append("}");
@@ -89,6 +85,7 @@ namespace GetCapacity
       CloudBlockBlob retval = null;
       try
       {
+        log.LogInformation("Connecting to block blob...");
         string blobConnectionString = config["BlobConnectionString"];
         string containerName = config["BlobContainerName"];
 
@@ -96,7 +93,22 @@ namespace GetCapacity
         CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
         CloudBlobContainer container = blobClient.GetContainerReference(containerName);
 
-        retval = container.GetBlockBlobReference("data.json");
+        string blobName = string.Empty;
+        if (ShouldCreateNewBlob(config))
+        {
+          //TODO: Consider timezone
+          blobName = DateTime.Now.ToString("MM-dd-yyyy") + ".json";
+          retval = container.GetBlockBlobReference(blobName);
+          config["currentBlob"] = blobName;
+          //TODO: update KV
+
+          Task.Run(() => retval.UploadTextAsync(""));
+        }
+        else
+        {
+          blobName = GetBlobName(config);
+          retval = container.GetBlockBlobReference(blobName);
+        }
       }
       catch (Exception ex)
       {
@@ -105,9 +117,29 @@ namespace GetCapacity
       return retval;
     }
 
+    public static string GetBlobName(IConfigurationRoot config)
+    {
+      return config["currentBlob"] != null ? config["currentBlob"] : "data.json";
+    }
+
+    public static bool ShouldCreateNewBlob(IConfigurationRoot config)
+    {
+      //TODO: Consider timezone
+      bool shouldCreateNewBlob = false;
+      DayOfWeek lastUpdate = (DayOfWeek)Enum.Parse(typeof(DayOfWeek),
+      (config["lastUpdateDay"] != null) ? config["lastUpdateDay"] : DateTime.Now.DayOfWeek.ToString()); //TODO:
+
+      if (DateTime.Now.DayOfWeek.Equals(DayOfWeek.Sunday) && lastUpdate.Equals(DayOfWeek.Saturday))
+      {
+        shouldCreateNewBlob = true;
+
+      }
+      return shouldCreateNewBlob;
+    }
+
     public static bool ShouldRun()
     {
-      // TODO: Figure out the span of time for all gyms
+      //TODO: Consider timezone
       TimeSpan startTime = new TimeSpan(5, 0, 0);
       TimeSpan endTime = new TimeSpan(21, 30, 0);
       DateTime now = DateTime.Now;
@@ -132,7 +164,7 @@ namespace GetCapacity
     {
       try
       {
-        log.LogInformation("Building out the config root");
+        log.LogInformation("Building out the config root...");
         IConfigurationBuilder configBuilder = new ConfigurationBuilder()
                 .SetBasePath(context.FunctionAppDirectory)
                 .AddEnvironmentVariables();

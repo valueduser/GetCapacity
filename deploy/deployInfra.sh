@@ -11,7 +11,7 @@ done)
 dt=$(date '+%Y%m%d%H%M');
 
 resourceGroupName="capacity"$dt
-storageAccountName="blob"$dt
+storageAccountName="capblob"$dt
 fnStorageAccountName="fnsto"$dt
 functionAppName="getcapacity"$dt
 functionContainer="function"$dt
