@@ -16,4 +16,4 @@ To deploy to Azure:
   * functionProjectLocation - Location of source code on local disk
   * url - Target page
   * xpath - Location on page of expected JSON data
-Run ./Deploy/deployInfra.sh
+3. Run ./Deploy/deployInfra.sh
